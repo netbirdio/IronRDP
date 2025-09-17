@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  release:
+    types: [created, published]
+  push:
+    tags:
+      - "v*"
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || github.actor_id }}
+  cancel-in-progress: true
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      BUILD_DIR: build/ironrdp-pkg
+    steps:
+      - name: Parse semver string
+        id: semver_parser
+        uses: booxmedialtd/ws-action-parse-semver@v1
+        with:
+          input_string: ${{ github.event.release.tag_name || (startsWith(github.ref, 'refs/tags/v') && github.ref) || 'refs/tags/v0.0.0' }}
+          version_extractor_regex: '\/v(.*)$'
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          target: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm-
+
+      - name: Install wasm-pack
+        run: |
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build IronRDP WASM
+        run: make
+
+      - name: Verify build output
+        run: |
+          if [ ! -d "${{ env.BUILD_DIR }}" ]; then
+            echo "Build directory not found: ${{ env.BUILD_DIR }}"
+            exit 1
+          fi
+          echo "Build contents:"
+          ls -la ${{ env.BUILD_DIR }}
+
+      - name: Create archive
+        run: |
+          cd build
+          tar -czf ironrdp-wasm-${{ steps.semver_parser.outputs.fullversion }}.tar.gz ironrdp-pkg/
+          echo "Archive created:"
+          ls -la *.tar.gz
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironrdp-wasm-${{ steps.semver_parser.outputs.fullversion }}
+          path: build/ironrdp-wasm-*.tar.gz
+          retention-days: 7
+
+      - name: Upload Release Asset
+        if: github.event_name == 'release'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: build/ironrdp-wasm-${{ steps.semver_parser.outputs.fullversion }}.tar.gz
+          asset_name: ironrdp-wasm-${{ steps.semver_parser.outputs.fullversion }}.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') && github.event_name != 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: build/ironrdp-wasm-*.tar.gz
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
