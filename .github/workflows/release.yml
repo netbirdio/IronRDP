@@ -69,40 +69,36 @@ jobs:
           echo "Build contents:"
           ls -la ${{ env.BUILD_DIR }}
 
-      - name: Create archive
+      - name: Remove unwanted files
         run: |
-          cd build
-          tar -czf ironrdp-wasm-${{ steps.semver_parser.outputs.fullversion }}.tar.gz \
-            --exclude='*.gitignore' \
-            --exclude='README.md' \
-            --exclude='package.json' \
-            ironrdp-pkg/
-          echo "Archive created:"
-          ls -la *.tar.gz
+          cd build/ironrdp-pkg
+          rm -f .gitignore README.md package.json
+          echo "Package contents:"
+          ls -la
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ironrdp-wasm-${{ steps.semver_parser.outputs.fullversion }}
-          path: build/ironrdp-wasm-*.tar.gz
+          path: build/ironrdp-pkg/
           retention-days: 7
 
-      - name: Upload Release Asset
+      - name: Upload Release Assets
         if: github.event_name == 'release'
-        uses: actions/upload-release-asset@v1
+        run: |
+          cd build/ironrdp-pkg
+          for file in *; do
+            echo "Uploading $file"
+            gh release upload ${{ github.event.release.tag_name }} "$file" --clobber
+          done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: build/ironrdp-wasm-${{ steps.semver_parser.outputs.fullversion }}.tar.gz
-          asset_name: ironrdp-wasm-${{ steps.semver_parser.outputs.fullversion }}.tar.gz
-          asset_content_type: application/gzip
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v') && github.event_name != 'release'
         uses: softprops/action-gh-release@v1
         with:
-          files: build/ironrdp-wasm-*.tar.gz
+          files: build/ironrdp-pkg/*
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
