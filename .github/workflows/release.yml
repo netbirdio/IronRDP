@@ -72,7 +72,11 @@ jobs:
       - name: Create archive
         run: |
           cd build
-          tar -czf ironrdp-wasm-${{ steps.semver_parser.outputs.fullversion }}.tar.gz ironrdp-pkg/
+          tar -czf ironrdp-wasm-${{ steps.semver_parser.outputs.fullversion }}.tar.gz \
+            --exclude='*.gitignore' \
+            --exclude='README.md' \
+            --exclude='package.json' \
+            ironrdp-pkg/
           echo "Archive created:"
           ls -la *.tar.gz
 
